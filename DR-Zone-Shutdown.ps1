@@ -1,6 +1,7 @@
 <#
 .SYNOPSIS
   - Mode 1: Display zonal/non-zonal VM groups with hostnames and let you choose one (or none) to deallocate.
+             After deallocation, outputs a PowerShell “restart” script that can start those VMs.
   - Mode 2: Create a single “test” VM in a specified availability zone, with basic networking auto-provisioned (no public IP), using the Azure CLI for VM creation.
 
 .PARAMETER WhatIf
@@ -11,7 +12,7 @@
   .\DR-Zone-Manager.ps1 -WhatIf
 
 .EXAMPLE
-  # Actually deallocate (interactive selection):
+  # Actually deallocate (interactive selection), then produce a restart script:
   .\DR-Zone-Manager.ps1
 
 .EXAMPLE
@@ -65,6 +66,7 @@ if ($modeInput -eq 3) {
 
 #———————————————————————————————————————————————
 # MODE 1: DEALLOCATE EXISTING VMS
+#          After deallocation, output a restart script for the same VMs
 #———————————————————————————————————————————————
 if ($modeInput -eq 1) {
     # 3a) Fetch all VMs + their Zones property
@@ -204,6 +206,25 @@ if ($modeInput -eq 1) {
 
         Write-Host "`nDeallocation commands submitted." -ForegroundColor Green
         "Run completed at $(Get-Date -Format 'u')" | Out-File -Append $logFile -Encoding UTF8
+
+        # 10) Build a “restart” PowerShell script for the same VMs
+        $restartFile = Join-Path $PSScriptRoot "DR-Zone-Restart-$timestamp.ps1"
+        $header = @(
+            "#`n# Restart Script generated on $(Get-Date -Format 'u')",
+            "# Contains commands to start the VMs that were deallocated:",
+            "#"
+        )
+        $header | Out-File $restartFile -Encoding UTF8
+
+        foreach ($vm in $targets) {
+            $rgNameForStart = $vm.ResourceGroup
+            $vmNameForStart = $vm.Name
+            $startCmd = "az vm start --resource-group `"$rgNameForStart`" --name `"$vmNameForStart`""
+            $startCmd | Out-File -Append $restartFile -Encoding UTF8
+        }
+
+        Write-Host "`nRestart script saved at: $restartFile" -ForegroundColor Cyan
+        "Restart script created: $restartFile" | Out-File -Append $logFile -Encoding UTF8
     }
     else {
         Write-Host "`nNo action taken." -ForegroundColor Green
@@ -216,7 +237,7 @@ if ($modeInput -eq 1) {
 
 #———————————————————————————————————————————————
 # MODE 2: CREATE A SINGLE TEST VM IN A SPECIFIED ZONE (NO PUBLIC IP)
-#      Uses Azure CLI 'az vm create' for VM creation
+#          Uses Azure CLI 'az vm create' for VM creation
 #———————————————————————————————————————————————
 elseif ($modeInput -eq 2) {
     Write-Host "`n** Creating a test VM (no public IP) **`n" -ForegroundColor Cyan
