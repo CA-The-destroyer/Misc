@@ -6,7 +6,7 @@ Behavior:
 - Migration ONLY happens *to* C:\Dev and ONLY from %APPDATA%\npm (if it exists)
 - No migration ever occurs *from* C:\Dev
 - On -Revert: switch prefix back to original (captured on first run), update PATH, no file copy
-- Writes "prefix=C:\Dev" to the user-level ~/.npmrc so it survives nvm-windows version switches
+- Writes "prefix=<target>" to the user-level ~/.npmrc so it survives nvm-windows version switches
   (use -NoUserNpmrc to skip writing ~/.npmrc)
 
 Parameters:
@@ -15,15 +15,19 @@ Parameters:
   -SkipTest                Skip installing and running the 'cowsay' test CLI
   -DryRun                  Show what would be done without making changes
   -NoUserNpmrc             Do not write/modify the user-level ~/.npmrc
+  -KeepSource              Keep %APPDATA%\npm entries in PATH after migration (files are never deleted)
 
 Examples:
   # Set npm prefix to C:\Dev, migrate from %APPDATA%\npm if it exists, persist in ~/.npmrc
   .\NPM_Path_Change.ps1
 
-  # Set npm prefix to D:\NodeGlobal (no migration, because we only migrate to C:\Dev), persist ~/.npmrc
+  # Set npm prefix to D:\NodeGlobal (no migration, only changes prefix and PATH), persist ~/.npmrc
   .\NPM_Path_Change.ps1 -Prefix 'D:\NodeGlobal'
 
-  # Set npm prefix to C:\Dev but skip test package; still persist ~/.npmrc
+  # Migrate to C:\Dev but keep old %APPDATA%\npm PATH entries too
+  .\NPM_Path_Change.ps1 -KeepSource
+
+  # Set npm prefix to C:\Dev but skip test package
   .\NPM_Path_Change.ps1 -SkipTest
 
   # Dry-run the actions without making changes
@@ -42,7 +46,8 @@ param(
     [switch]$Revert,
     [switch]$SkipTest,
     [switch]$DryRun,
-    [switch]$NoUserNpmrc
+    [switch]$NoUserNpmrc,
+    [switch]$KeepSource
 )
 
 #----------------- constants -----------------
@@ -82,7 +87,7 @@ function Get-NpmBin(){
     if (-not [string]::IsNullOrWhiteSpace($pref)) {
         $candidate = Join-Path $pref 'node_modules\.bin'
         if (Test-Path $candidate) { return $candidate }
-        if (Test-Path $pref) { return $pref } # older npm on Windows
+        if (Test-Path $pref) { return $pref } # older npm on Windows drops shims here
     }
     return $null
 }
@@ -222,9 +227,14 @@ if (-not $Revert -and ($targetPrefix -ieq 'C:\Dev')) {
     if ((Test-Path $DefaultUserNpm) -and ((Resolve-Path $DefaultUserNpm).Path -ine (Resolve-Path $targetPrefix).Path)) {
         Write-Step "Migrating global packages from: $DefaultUserNpm  ->  $targetPrefix"
         Copy-Tree -Src $DefaultUserNpm -Dst $targetPrefix
-        # Remove old npm user-path entries from PATH after migration
-        $removeFromPath = PathPiecesFromPrefix $DefaultUserNpm
-        Remove-UserPathEntries -Entries $removeFromPath
+
+        if (-not $KeepSource) {
+            # Remove old npm user-path entries from PATH after migration
+            $removeFromPath = PathPiecesFromPrefix $DefaultUserNpm
+            Remove-UserPathEntries -Entries $removeFromPath
+        } else {
+            Write-Info "Keeping original %APPDATA%\npm entries in PATH (per -KeepSource)"
+        }
     } else {
         Write-Info "Migration skipped (no %APPDATA%\npm found or source equals target)."
     }
@@ -236,7 +246,7 @@ if (-not $Revert -and ($targetPrefix -ieq 'C:\Dev')) {
 $addEntries = PathPiecesFromPrefix $targetPrefix
 $removeEntries = @()
 if ($currPrefix -and ($currPrefix -ne $targetPrefix)) { $removeEntries += PathPiecesFromPrefix $currPrefix }
-# (We already removed %APPDATA%\npm above if we migrated from it)
+# (We may have already removed %APPDATA%\npm above unless -KeepSource was set)
 
 Write-Step "Updating PATH"
 Add-UserPathEntries -Entries $addEntries
