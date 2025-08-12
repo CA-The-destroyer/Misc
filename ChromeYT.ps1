@@ -1,57 +1,45 @@
 <# 
-Create a new Chrome profile and configure Integrated Auth
-for silent SSO to Entra ID without copying credentials.
+Per-user Chrome launcher for a clean profile on Terminal Server / RDS.
+- No HKCU or HKLM writes
+- Creates (if missing) and launches profile "Youtube_Test"
+- Opens Entra ID login page
 #>
 
-# ---------------------------
-# CONFIG
-# ---------------------------
-$ProfileName = "Youtube_Test"
-$IdpUrl = "https://login.microsoftonline.com/"
-$AllowlistDomains = "*.microsoftonline.com, login.microsoftonline.com"
+param(
+    [string]$ProfileName = "Youtube_Test",
+    [string]$IdpUrl      = "https://login.microsoftonline.com/"
+)
 
-# ---------------------------
-# STEP 1: Configure Chrome Integrated Auth
-# ---------------------------
-$chromePolicyKey = 'HKCU:\Software\Policies\Google\Chrome'
-New-Item -Path $chromePolicyKey -Force | Out-Null
-
-New-ItemProperty -Path $chromePolicyKey -Name 'AuthServerAllowlist' -Value $AllowlistDomains -PropertyType String -Force | Out-Null
-New-ItemProperty -Path $chromePolicyKey -Name 'AuthNegotiateDelegateAllowlist' -Value $AllowlistDomains -PropertyType String -Force | Out-Null
-New-ItemProperty -Path $chromePolicyKey -Name 'AuthSchemes' -Value 'negotiate,ntlm' -PropertyType String -Force | Out-Null
-
-Write-Host "Chrome Integrated Auth policies configured for: $AllowlistDomains"
-
-# ---------------------------
-# STEP 2: Locate Chrome EXE
-# ---------------------------
-$chromePath = "$env:ProgramFiles\Google\Chrome\Application\chrome.exe"
-if (-not (Test-Path $chromePath)) {
-    $chromePath = "$env:ProgramFiles(x86)\Google\Chrome\Application\chrome.exe"
+# --- Locate Chrome (user scope, no admin required) ---
+$chrome = Join-Path $env:ProgramFiles "Google\Chrome\Application\chrome.exe"
+if (-not (Test-Path $chrome)) {
+    $chrome = Join-Path ${env:ProgramFiles(x86)} "Google\Chrome\Application\chrome.exe"
 }
-if (-not (Test-Path $chromePath)) {
-    Write-Error "Google Chrome executable not found."
+if (-not (Test-Path $chrome)) {
+    Write-Error "Google Chrome not found in Program Files. Install Chrome, then re-run."
     exit 1
 }
 
-# ---------------------------
-# STEP 3: Ensure profile folder exists
-# ---------------------------
+# --- Resolve per-user Chrome User Data path (works with FSLogix/Roaming) ---
 $userDataDir = Join-Path $env:LOCALAPPDATA "Google\Chrome\User Data"
 $profilePath = Join-Path $userDataDir $ProfileName
 
+# Ensure User Data root exists
+if (-not (Test-Path $userDataDir)) {
+    New-Item -ItemType Directory -Path $userDataDir -Force | Out-Null
+}
+
+# Create profile folder for THIS user if missing (no registry changes)
 if (-not (Test-Path $profilePath)) {
     New-Item -ItemType Directory -Path $profilePath -Force | Out-Null
     Write-Host "Created new profile folder: $profilePath"
 } else {
-    Write-Host "Profile folder already exists: $profilePath"
+    Write-Host "Using existing profile folder: $profilePath"
 }
 
-# ---------------------------
-# STEP 4: Launch Chrome with new profile to Entra ID login
-# ---------------------------
-Write-Host "Launching Chrome with profile '$ProfileName' to $IdpUrl"
-Start-Process -FilePath $chromePath -ArgumentList @(
+# --- Launch Chrome with the specified profile to Entra ID login ---
+Write-Host "Launching Chrome with profile '$ProfileName' -> $IdpUrl"
+Start-Process -FilePath $chrome -ArgumentList @(
     "--profile-directory=$ProfileName",
     "--no-first-run",
     "--new-window",
