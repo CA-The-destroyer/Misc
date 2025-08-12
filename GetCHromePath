@@ -1,0 +1,2 @@
+Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe' |
+    Select-Object -ExpandProperty '(default)'
